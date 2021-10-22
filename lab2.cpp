@@ -7,7 +7,10 @@
 #include <deque>
 #include <queue>
 using namespace std;
-
+// Some probs I need to consider later
+// 1. CURRENT_RUNNING_PROCESS setup
+// 2. when to reinitialize quantum
+// 3. the use of test_preempt (not in use right now)
 enum State
 {
     Created,
@@ -27,6 +30,7 @@ public:
     queue<Process*> runQueue;
     virtual void add_process(Process* process) = 0;
     virtual Process* get_next_process() = 0;
+    virtual bool test_preempt(Process *p, int curtime ) = 0; // false but for ‘E’
     virtual ~Scheduler() {}
 };
 
@@ -46,6 +50,11 @@ public:
         runQueue.pop();
         return next;
     }
+    bool test_preempt(Process *p, int curtime)
+    {
+        // false but for ‘E’
+        return false;
+    }; 
 };
 
 class Process
@@ -134,7 +143,6 @@ void Simulation()
         CURRENT_TIME = evt->timeStamp; 
         int temp = CURRENT_TIME-proc->state_ts;
         timeInPrevState = CURRENT_TIME - proc->state_ts;
-
         switch (evt->newState)
         { // which state to transition to?
         case Ready: {
@@ -151,6 +159,8 @@ void Simulation()
         }
         case Run: {
             // create event for either preemption or blocking
+            // set CURRENT_RUNNING_PROCESS
+            CURRENT_RUNNING_PROCESS = proc;
             int next_cpu_burst = proc->rem_cb==0?min(myrandom(proc->CB), proc->TC):proc->rem_cb; // generate random int for cpu_burst
             proc->rem_cb = next_cpu_burst;
             Event* nextEvt;
@@ -183,6 +193,8 @@ void Simulation()
         }
         case Block: {
             //create an event for when process becomes READY again
+            // set CURRENT_RUNNING_PROCESS
+            CURRENT_RUNNING_PROCESS = nullptr;
             Event* nextEvt;
             int next_io_burst = myrandom(proc->IO);
             nextEvt = new Event(proc, Block, Ready, CURRENT_TIME+next_io_burst);
@@ -191,6 +203,8 @@ void Simulation()
         }
         case Preempt: {
             // add to runqueue (no event is generated)
+            // set CURRENT_RUNNING_PROCESS
+            CURRENT_RUNNING_PROCESS = nullptr;
             THE_SCHEDULER->add_process(proc);
             CALL_SCHEDULER = true;
             break;
@@ -200,7 +214,6 @@ void Simulation()
             break;
         }
             
-        
         }
 
         // remove current event object from Memory 
@@ -217,8 +230,9 @@ void Simulation()
                 CURRENT_RUNNING_PROCESS = THE_SCHEDULER->get_next_process();
                 if (CURRENT_RUNNING_PROCESS == nullptr)
                     continue;
-
                 // create event to make this process runnable for same time.
+                Event* nextEvt = new Event(CURRENT_RUNNING_PROCESS, Ready, Run, CURRENT_TIME);
+                desLayer->add_event(nextEvt);
             }
         }
     }
