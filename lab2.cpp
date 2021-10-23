@@ -23,6 +23,7 @@ enum State
 class Process;
 class Event;
 class DES;
+int myrandom(int burst);
 
 class Scheduler
 {
@@ -64,20 +65,31 @@ public:
     int TC; // Total CPU Time
     int CB; // CPU Burst
     int IO; // IO Burst
-    int prio;
+
+    int FT; // Fiinishing time
+    int TT; // Tournaround time
+    int IT; // I/O Time
+    int PRIO;
+    int CW; // CPU Waiting
+    int RT; // Remaining CPU Time
+    int pid;
     int quantum;
     int state_ts;
     int rem_cb; // whether has remaining cpu_burst or need to initialize
-    Process(int arrivedTime, int totalCPU, int cpuBurst, int ioBurst, int priority, int timeSlice)
+    Process(int id, int arrivedTime, int totalCPU, int cpuBurst, int ioBurst, int priority, int timeSlice)
     {
+        pid = id;
         AT = arrivedTime;
         TC = totalCPU;
         CB = cpuBurst;
         IO = ioBurst;
-        prio = priority;
+        CW = 0;
+        PRIO = priority;
         quantum = timeSlice;
         state_ts = arrivedTime;
         rem_cb = 0;
+        RT = TC;
+        IT = 0;
     }
 };
 class Event
@@ -101,7 +113,11 @@ class DES
 public:
     deque<Event*> eventQueue; // event queue for the DES layer
     int get_next_event_time() {
-        return eventQueue.front()->timeStamp;
+        if(eventQueue.empty()) {
+            return -1;
+        } else {
+            return eventQueue.front()->timeStamp;
+        }
     }
     Event* get_event()
     {
@@ -127,6 +143,7 @@ public:
 
 // some global variable
 // define scheduler
+string SCHEDULER_NAME;
 Scheduler* THE_SCHEDULER = new FCFS();
 bool CALL_SCHEDULER = false;
 int CURRENT_TIME, timeInPrevState;
@@ -134,6 +151,27 @@ Process* CURRENT_RUNNING_PROCESS;
 DES* desLayer = new DES();
 deque<int> randvals;
 int THE_QUANTUM, MAX_PRIO;
+vector< vector<int> > io_list;
+vector<Process*> procList;
+int computeSumryIO(vector<vector<int> >& intervals) {
+        sort(intervals.begin(), intervals.end());
+        int sumryIO = 0;
+        vector<vector<int> > merged;
+        for (int i=0; i<intervals.size(); i++) {
+            vector<int> interval = intervals[i];
+            if (merged.empty() || merged.back()[1] < interval[0]) {
+                merged.push_back(interval);
+            }
+            else {
+                merged.back()[1] = max(merged.back()[1], interval[1]);
+            }
+        }
+        for(int i=0; i<merged.size(); i++) {
+            vector<int> cur = merged[i];
+            sumryIO += (cur[1]-cur[0]);
+        }
+        return sumryIO;
+}
 void Simulation()
 {
     Event *evt;
@@ -141,6 +179,7 @@ void Simulation()
     {
         Process *proc = evt->process; // this is the process the event works on 
         CURRENT_TIME = evt->timeStamp; 
+        
         int temp = CURRENT_TIME-proc->state_ts;
         timeInPrevState = CURRENT_TIME - proc->state_ts;
         switch (evt->newState)
@@ -148,8 +187,8 @@ void Simulation()
         case Ready: {
             // must come from BLOCKED or from PREEMPTION 
             // must add to run queue
-            THE_SCHEDULER->add_process(evt->process);
-            Event* newEvt = new Event(evt->process, Ready, Run, CURRENT_TIME);
+            THE_SCHEDULER->add_process(proc);
+            Event* newEvt = new Event(proc, Ready, Run, CURRENT_TIME);
             desLayer->add_event(newEvt);
             if(CURRENT_RUNNING_PROCESS==nullptr) {
                 // conditional on whether something is run
@@ -160,20 +199,21 @@ void Simulation()
         case Run: {
             // create event for either preemption or blocking
             // set CURRENT_RUNNING_PROCESS
+            proc->CW += (CURRENT_TIME-proc->state_ts);
             CURRENT_RUNNING_PROCESS = proc;
-            int next_cpu_burst = proc->rem_cb==0?min(myrandom(proc->CB), proc->TC):proc->rem_cb; // generate random int for cpu_burst
+            int next_cpu_burst = proc->rem_cb==0?min(myrandom(proc->CB), proc->RT):proc->rem_cb; // generate random int for cpu_burst
             proc->rem_cb = next_cpu_burst;
             Event* nextEvt;
             if(proc->quantum>next_cpu_burst) {
                 // turn to blocking state
-                proc->TC -= next_cpu_burst;
+                proc->RT -= next_cpu_burst;
                 proc->quantum -= next_cpu_burst;
                 proc->rem_cb -= next_cpu_burst;
                 nextEvt = new Event(proc, Run, Block, CURRENT_TIME+next_cpu_burst);
             } else {
                 // if quantum assigned to this process is less than the current cpu_burst, then minus 
                 // remaining quantum and turn the process to preemption state
-                proc->TC -= proc->quantum;
+                proc->RT -= proc->quantum;
                 proc->rem_cb -= proc->quantum;
                 nextEvt = new Event(proc, Run, Preempt, CURRENT_TIME+proc->quantum);
                 // TODO 
@@ -183,11 +223,15 @@ void Simulation()
             }
             // add new event to right position in DES layer
             // if the process has been terminated, then don't add new event
-            if(proc->TC!=0) {
+            if(proc->RT!=0) {
                 desLayer->add_event(nextEvt);
             } else {
                 delete nextEvt;
                 nextEvt = nullptr;
+                // set Finishing time
+                proc->FT = CURRENT_TIME;
+                // set Tournaround time 
+                proc->TT = proc->FT-proc->AT;
             }
             break;
         }
@@ -197,6 +241,13 @@ void Simulation()
             CURRENT_RUNNING_PROCESS = nullptr;
             Event* nextEvt;
             int next_io_burst = myrandom(proc->IO);
+            // add to io utilization list
+            vector<int> nextIOPair;
+            nextIOPair.push_back(CURRENT_TIME);
+            nextIOPair.push_back(CURRENT_TIME+next_io_burst);
+            io_list.push_back(nextIOPair);
+            // add io burst time to process set IT
+            proc->IT += next_io_burst;
             nextEvt = new Event(proc, Block, Ready, CURRENT_TIME+next_io_burst);
             CALL_SCHEDULER = true;
             break;
@@ -215,6 +266,8 @@ void Simulation()
         }
             
         }
+        // update the state timestamp for process
+        proc->state_ts = CURRENT_TIME;
 
         // remove current event object from Memory 
         delete evt;
@@ -238,6 +291,36 @@ void Simulation()
     }
 }
 
+// Summary is used to print standard output of this simulation
+void Summary() {
+    printf("%s\n", SCHEDULER_NAME.c_str());
+    vector<Process*>::iterator procIte = procList.begin();
+    int procCnt = procList.size();
+    int sumryFT = INT_MIN; // Finishing time of the last event (i.e. the last process finished execution)
+    int sumryCPU = 0; 
+    int sumryTT = 0;
+    int sumryCW = 0;
+    int minAT = INT_MAX;
+    while(procIte!=procList.end()) {
+        Process* cur = *procIte;
+        printf("%04d: %4d %4d %4d %4d %1d | %5d %5d %5d %5d\n", cur->pid, cur->AT, cur->TC, cur->CB, cur->IO, cur->PRIO, cur->FT, cur->TT, cur->IT, cur->CW);
+        minAT = min(cur->AT, minAT);
+        sumryFT = max(cur->FT, sumryFT);
+        sumryCPU += cur->TC;
+        sumryTT += cur->TT;
+        sumryCW += cur->CW;
+        *procIte++;
+    }
+    int sumryIO = computeSumryIO(io_list);
+    int dur = sumryFT - minAT;
+    double sumryCPUUtil = sumryCPU/dur; // CPU utilization (i.e. percentage (0.0 – 100.0) of time at least one process is running
+    double sumryIOUtil = sumryIO/dur; // IO utilization (i.e. percentage (0.0 – 100.0) of time at least one process is performing IO
+    double sumryAveTT = sumryTT/procCnt; // Average turnaround time among processes
+    double sumryAveCW = sumryCW/procCnt; // Average cpu waiting time among processes
+    double sumryThroughput = sumryFT/procCnt*100; // Throughput of number processes per 100 time units
+    printf("SUM: %d %.2lf %.2lf %.2lf %.2lf %.3lf\n", sumryFT, sumryCPUUtil, sumryIOUtil, sumryAveTT, sumryAveCW, sumryThroughput);
+}
+
 // set up random generator using rand number from rfile
 int myrandom(int burst) { 
     int nextRand = randvals.front();
@@ -250,11 +333,13 @@ int myrandom(int burst) {
 int main(int argc, char *argv[])
 {
     // initialize scheduler global variable 
+    SCHEDULER_NAME = "FCFS";
     MAX_PRIO = 4;
     THE_QUANTUM = 10000;
     // read input file
     fstream file;
     file.open("./input/input0", fstream::in);
+    int procCnt = 0; // used to signal process id
     while (!file.eof())
     {
         string line;
@@ -271,9 +356,11 @@ int main(int argc, char *argv[])
             int totalCPU = stoi(tokens.at(1));
             int cpuBurst = stoi(tokens.at(2));
             int ioBurst = stoi(tokens.at(3));
-            Process proc(arrivedTime, totalCPU, cpuBurst, ioBurst, MAX_PRIO, THE_QUANTUM);
-            Event event(&proc, Created, Ready, arrivedTime);
-            desLayer->eventQueue.push_back(&event);
+            Process* proc = new Process(procCnt, arrivedTime, totalCPU, cpuBurst, ioBurst, MAX_PRIO, THE_QUANTUM);
+            procList.push_back(proc);
+            Event* event = new Event(proc, Created, Ready, arrivedTime);
+            desLayer->add_event(event);
+            procCnt ++;
         }
     }
     file.close();
@@ -285,8 +372,13 @@ int main(int argc, char *argv[])
     int randCnt = stoi(line);
     while(!randFile.eof()) {
         getline(randFile, line, '\n');
-        int randNum = stoi(line);
-        randvals.push_back(randNum);
+        if(line.length()>0) {
+            int randNum = stoi(line);
+            randvals.push_back(randNum);
+        }
     }
     randFile.close();
+    // Simulation Part
+    Simulation();
+    Summary();
 }
