@@ -6,6 +6,7 @@
 #include <vector>
 #include <deque>
 #include <queue>
+#include <map>
 using namespace std;
 // Some probs I need to consider later
 // 1. CURRENT_RUNNING_PROCESS setup
@@ -24,6 +25,7 @@ class Process;
 class Event;
 class DES;
 int myrandom(int burst);
+char* stateConvert(State target);
 
 class Scheduler
 {
@@ -47,9 +49,15 @@ public:
     }
     Process* get_next_process()
     {
-        Process* next = runQueue.front();
-        runQueue.pop();
-        return next;
+        Process* next;
+        if(runQueue.empty()) {
+            return nullptr;
+        } else {
+            next = runQueue.front();
+            runQueue.pop();
+            return next;
+        }
+        
     }
     bool test_preempt(Process *p, int curtime)
     {
@@ -121,22 +129,49 @@ public:
     }
     Event* get_event()
     {
-        Event *evt = DES::eventQueue.front();
-        eventQueue.pop_front();
-        return evt;
+        if(eventQueue.empty()) {
+            return nullptr;
+        } else {
+            Event *evt = eventQueue.front();
+            eventQueue.pop_front();
+            return evt;
+        }
     }
     void add_event(Event* target)
     {
-        // add event and insert the event according to time order
-        deque<Event*>::iterator it = eventQueue.begin();
-        // if timestamp is equal to this target, still the target should be behind !
-        while(it != eventQueue.end()&&(*it)->timeStamp<=target->timeStamp) {
-            *it++;
+        char* originalEvtQ = printEventQ();
+        if(eventQueue.size()>0) {
+            // add event and insert the event according to time order
+            deque<Event*>::iterator it = eventQueue.begin();
+            // if timestamp is equal to this target, still the target should be behind !
+            while(it != eventQueue.end()&&(*it)->timeStamp<=target->timeStamp) {
+                *it++;
+            }
+            eventQueue.insert(it, target);
+        } else {
+            eventQueue.push_back(target);
         }
-        eventQueue.insert(it, target);
+        char* newEvtQ = printEventQ();
+        printf("AddEvent(%d:%d:%s): %s ==> %s\n", target->timeStamp, target->process->pid, stateConvert(target->newState), originalEvtQ, newEvtQ);
     }
     void rm_event()
     {
+    }
+    char* printEventQ() {
+        string rst = "";
+        for(int i=0; i<eventQueue.size(); i++) {
+            Event* evt = eventQueue.at(i);
+            string eStr = "";
+            eStr += (to_string(evt->timeStamp)+":");
+            eStr += (to_string(evt->process->pid)+":");
+            eStr += (stateConvert(evt->newState));
+            if(i!=eventQueue.size()-1) eStr += " ";
+            rst += eStr;
+        }
+        char * cstr = new char [rst.length()+1];
+        strcpy (cstr, rst.c_str());
+        return cstr;
+        
     }
     
 };
@@ -153,6 +188,39 @@ deque<int> randvals;
 int THE_QUANTUM, MAX_PRIO;
 vector< vector<int> > io_list;
 vector<Process*> procList;
+
+char* stateConvert(State target) {
+    string rst;
+    switch(target) {
+        case (Created): {
+            rst =  "CREATED";
+            break;
+        }
+        case(Ready): {
+            rst = "READY";
+            break;
+        }
+        case(Run): {
+            rst = "RUNNG";
+            break;
+        }
+        case(Block): {
+            rst = "BLOCK";
+            break;
+        }
+        case(Preempt): {
+            rst = "PREEMPT";
+            break;
+        }
+        
+    };
+
+    char * cstr = new char [rst.length()+1];
+    std::strcpy (cstr, rst.c_str());
+    return cstr;
+}
+
+
 int computeSumryIO(vector<vector<int> >& intervals) {
         sort(intervals.begin(), intervals.end());
         int sumryIO = 0;
@@ -182,6 +250,7 @@ void Simulation()
         
         int temp = CURRENT_TIME-proc->state_ts;
         timeInPrevState = CURRENT_TIME - proc->state_ts;
+        printf("%d %d %d: %s -> %s\n", CURRENT_TIME, evt->process->pid, timeInPrevState, stateConvert(evt->oldState), stateConvert(evt->newState));
         switch (evt->newState)
         { // which state to transition to?
         case Ready: {
@@ -229,7 +298,7 @@ void Simulation()
                 delete nextEvt;
                 nextEvt = nullptr;
                 // set Finishing time
-                proc->FT = CURRENT_TIME;
+                proc->FT = nextEvt->timeStamp;
                 // set Tournaround time 
                 proc->TT = proc->FT-proc->AT;
             }
@@ -249,6 +318,7 @@ void Simulation()
             // add io burst time to process set IT
             proc->IT += next_io_burst;
             nextEvt = new Event(proc, Block, Ready, CURRENT_TIME+next_io_burst);
+            desLayer->add_event(nextEvt);
             CALL_SCHEDULER = true;
             break;
         }
@@ -317,7 +387,8 @@ void Summary() {
     double sumryIOUtil = sumryIO/dur; // IO utilization (i.e. percentage (0.0 – 100.0) of time at least one process is performing IO
     double sumryAveTT = sumryTT/procCnt; // Average turnaround time among processes
     double sumryAveCW = sumryCW/procCnt; // Average cpu waiting time among processes
-    double sumryThroughput = sumryFT/procCnt*100; // Throughput of number processes per 100 time units
+    
+    double sumryThroughput = sumryFT/(procCnt*100); // Throughput of number processes per 100 time units
     printf("SUM: %d %.2lf %.2lf %.2lf %.2lf %.3lf\n", sumryFT, sumryCPUUtil, sumryIOUtil, sumryAveTT, sumryAveCW, sumryThroughput);
 }
 
@@ -336,6 +407,7 @@ int main(int argc, char *argv[])
     SCHEDULER_NAME = "FCFS";
     MAX_PRIO = 4;
     THE_QUANTUM = 10000;
+    
     // read input file
     fstream file;
     file.open("./input/input0", fstream::in);
