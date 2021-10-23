@@ -27,45 +27,6 @@ class DES;
 int myrandom(int burst);
 char* stateConvert(State target);
 
-class Scheduler
-{
-public:
-    queue<Process*> runQueue;
-    virtual void add_process(Process* process) = 0;
-    virtual Process* get_next_process() = 0;
-    virtual bool test_preempt(Process *p, int curtime ) = 0; // false but for ‘E’
-    virtual ~Scheduler() {}
-};
-
-class FCFS: public Scheduler
-{
-public:
-    FCFS()
-    {
-    }
-    void add_process(Process* process)
-    {
-        runQueue.push(process);
-    }
-    Process* get_next_process()
-    {
-        Process* next;
-        if(runQueue.empty()) {
-            return nullptr;
-        } else {
-            next = runQueue.front();
-            runQueue.pop();
-            return next;
-        }
-        
-    }
-    bool test_preempt(Process *p, int curtime)
-    {
-        // false but for ‘E’
-        return false;
-    }; 
-};
-
 class Process
 {
 public:
@@ -100,6 +61,54 @@ public:
         IT = 0;
     }
 };
+
+class Scheduler
+{
+public:
+    queue<Process*> runQueue;
+    virtual void add_process(Process* process) = 0;
+    virtual Process* get_next_process() = 0;
+    virtual bool test_preempt(Process *p, int curtime ) = 0; // false but for ‘E’
+    virtual ~Scheduler() {}
+};
+
+class FCFS: public Scheduler
+{
+public:
+    FCFS()
+    {
+    }
+    void add_process(Process* process)
+    {
+        runQueue.push(process);
+    }
+    Process* get_next_process()
+    {
+        Process* next;
+        if(runQueue.empty()) {
+            return nullptr;
+        } else {
+            next = runQueue.front();
+            runQueue.pop();
+            while(next->RT==0&&!runQueue.empty()) {
+                next = runQueue.front();
+                runQueue.pop();
+            }
+            if(next->RT==0) {
+                return nullptr;
+            } else {
+                return next;
+            }
+        }
+        
+    }
+    bool test_preempt(Process *p, int curtime)
+    {
+        // false but for ‘E’
+        return false;
+    }; 
+};
+
 class Event
 {
 public:
@@ -257,12 +266,13 @@ void Simulation()
             // must come from BLOCKED or from PREEMPTION 
             // must add to run queue
             THE_SCHEDULER->add_process(proc);
-            Event* newEvt = new Event(proc, Ready, Run, CURRENT_TIME);
-            desLayer->add_event(newEvt);
+            // Event* newEvt = new Event(proc, Ready, Run, CURRENT_TIME);
+            // desLayer->add_event(newEvt);
             if(CURRENT_RUNNING_PROCESS==nullptr) {
                 // conditional on whether something is run
                 CALL_SCHEDULER = true;
-            }
+            } 
+            if(CURRENT_TIME==726) cout << CURRENT_RUNNING_PROCESS << endl;
             break;
         }
         case Run: {
@@ -270,7 +280,9 @@ void Simulation()
             // set CURRENT_RUNNING_PROCESS
             proc->CW += (CURRENT_TIME-proc->state_ts);
             CURRENT_RUNNING_PROCESS = proc;
-            int next_cpu_burst = proc->rem_cb==0?min(myrandom(proc->CB), proc->RT):proc->rem_cb; // generate random int for cpu_burst
+            // generate random int for cpu_burst
+            // notice that we need compare to remaining time of this process RT
+            int next_cpu_burst = proc->rem_cb==0?min(myrandom(proc->CB), proc->RT):min(proc->rem_cb, proc->RT); 
             proc->rem_cb = next_cpu_burst;
             Event* nextEvt;
             if(proc->quantum>next_cpu_burst) {
@@ -295,12 +307,14 @@ void Simulation()
             if(proc->RT!=0) {
                 desLayer->add_event(nextEvt);
             } else {
-                delete nextEvt;
-                nextEvt = nullptr;
                 // set Finishing time
                 proc->FT = nextEvt->timeStamp;
                 // set Tournaround time 
                 proc->TT = proc->FT-proc->AT;
+                CURRENT_RUNNING_PROCESS = nullptr;
+                delete nextEvt;
+                nextEvt = nullptr;
+                CALL_SCHEDULER = true;
             }
             break;
         }
@@ -382,13 +396,12 @@ void Summary() {
         *procIte++;
     }
     int sumryIO = computeSumryIO(io_list);
-    int dur = sumryFT - minAT;
-    double sumryCPUUtil = sumryCPU/dur; // CPU utilization (i.e. percentage (0.0 – 100.0) of time at least one process is running
-    double sumryIOUtil = sumryIO/dur; // IO utilization (i.e. percentage (0.0 – 100.0) of time at least one process is performing IO
-    double sumryAveTT = sumryTT/procCnt; // Average turnaround time among processes
-    double sumryAveCW = sumryCW/procCnt; // Average cpu waiting time among processes
+    double sumryCPUUtil = 100.0*(sumryCPU/(double)sumryFT); // CPU utilization (i.e. percentage (0.0 – 100.0) of time at least one process is running
+    double sumryIOUtil = 100.0*(sumryIO/(double)sumryFT); // IO utilization (i.e. percentage (0.0 – 100.0) of time at least one process is performing IO
+    double sumryAveTT = (sumryTT*1.0)/procCnt; // Average turnaround time among processes
+    double sumryAveCW = (sumryCW*1.0)/procCnt; // Average cpu waiting time among processes
     
-    double sumryThroughput = sumryFT/(procCnt*100); // Throughput of number processes per 100 time units
+    double sumryThroughput = 100.0*(procCnt/(double)sumryFT); // Throughput of number processes per 100 time units
     printf("SUM: %d %.2lf %.2lf %.2lf %.2lf %.3lf\n", sumryFT, sumryCPUUtil, sumryIOUtil, sumryAveTT, sumryAveCW, sumryThroughput);
 }
 
@@ -410,7 +423,7 @@ int main(int argc, char *argv[])
     
     // read input file
     fstream file;
-    file.open("./input/input0", fstream::in);
+    file.open("./input/input4", fstream::in);
     int procCnt = 0; // used to signal process id
     while (!file.eof())
     {
