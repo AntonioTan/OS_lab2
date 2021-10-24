@@ -392,6 +392,7 @@ void Simulation()
         }
         // update the state timestamp for process
         proc->state_ts = CURRENT_TIME;
+        if(proc->RT==0) proc->state_ts = evt->timeStamp;
 
         // remove current event object from Memory 
         delete evt;
@@ -477,7 +478,7 @@ int main(int argc, char *argv[])
     randFile.close();
     // read input file
     fstream file;
-    file.open("./input/input6", fstream::in);
+    file.open("./input/input4", fstream::in);
     int procCnt = 0; // used to signal process id
     while (!file.eof())
     {
