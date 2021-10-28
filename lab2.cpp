@@ -7,6 +7,7 @@
 #include <deque>
 #include <queue>
 #include <map>
+#include <set>
 using namespace std;
 // Some probs I need to consider later
 // 1. CURRENT_RUNNING_PROCESS setup
@@ -24,9 +25,27 @@ enum State
 
 class Process;
 class Event;
+class Scheduler;
+class FCFS;
+class LCFS;
 class DES;
-int myrandom(int burst);
 char* stateConvert(State target);
+void Simulation();
+int computeSumryIO(vector<vector<int> >& intervals);
+void Summary();
+int myrandom(int burst);
+
+// some global variable
+string SCHEDULER_NAME;
+Scheduler* THE_SCHEDULER;
+bool CALL_SCHEDULER = false;
+int CURRENT_TIME, timeInPrevState;
+Process* CURRENT_RUNNING_PROCESS;
+DES* desLayer;
+deque<int> randvals;
+int THE_QUANTUM, MAX_PRIO;
+vector< vector<int> > io_list;
+vector<Process*> procList;
 
 class Process
 {
@@ -39,7 +58,8 @@ public:
     int FT; // Fiinishing time
     int TT; // Tournaround time
     int IT; // I/O Time
-    int PRIO;
+    int PRIO; // static priority
+    int DYN_PRIO; // dynamic priority
     int CW; // CPU Waiting
     int RT; // Remaining CPU Time
     int pid;
@@ -55,6 +75,7 @@ public:
         IO = ioBurst;
         CW = 0;
         PRIO = priority;
+        DYN_PRIO = priority-1;
         quantum = timeSlice;
         state_ts = arrivedTime;
         rem_cb = 0;
@@ -66,7 +87,6 @@ public:
 class Scheduler
 {
 public:
-    queue<Process*> runQueue;
     virtual void add_process(Process* process) = 0;
     virtual Process* get_next_process() = 0;
     virtual bool test_preempt(Process *p, int curtime ) = 0; // false but for ‘E’
@@ -76,6 +96,7 @@ public:
 class FCFS: public Scheduler
 {
 public:
+    queue<Process*> runQueue;
     FCFS()
     {
     }
@@ -110,6 +131,43 @@ public:
     }; 
 };
 
+class LCFS: public Scheduler 
+{
+public:
+    deque<Process*> runQueue;
+    LCFS()
+    {
+    }
+    void add_process(Process* process) {
+        runQueue.push_front(process);
+    }
+    Process* get_next_process() {
+        Process* next;
+        if(runQueue.empty()) {
+            return nullptr;
+        } else {
+            next = runQueue.front();
+            runQueue.pop_front();
+            while(next->RT==0&&!runQueue.empty()) {
+                next = runQueue.front();
+                runQueue.pop_front();
+            }
+            if(next->RT==0) {
+                return nullptr;
+            } else {
+                return next;
+            }
+        }
+    }
+    
+    bool test_preempt(Process *p, int curtime)
+    {
+        // false but for ‘E’
+        return false;
+    }
+
+};
+
 class Event
 {
 public:
@@ -126,6 +184,8 @@ public:
     }
     
 };
+
+
 class DES
 {
 public:
@@ -180,6 +240,20 @@ public:
     }
     void rm_event()
     {
+        // for preempt condition remove event of CURRENT_RUNNING_PROCESS
+        deque<Event*> foundDeque;
+        while(!eventQueue.empty()) {
+           Event* cur = eventQueue.front();
+           if(cur->process->pid!=CURRENT_RUNNING_PROCESS->pid) {
+               foundDeque.push_back(cur);
+           }
+           eventQueue.pop_front();
+        }
+        while(!foundDeque.empty()) {
+            Event* cur = foundDeque.front();
+            eventQueue.push_back(cur);
+            foundDeque.pop_front();
+        }
     }
     char* printEventQ() {
         string rst = "";
@@ -200,18 +274,6 @@ public:
     
 };
 
-// some global variable
-// define scheduler
-string SCHEDULER_NAME;
-Scheduler* THE_SCHEDULER = new FCFS();
-bool CALL_SCHEDULER = false;
-int CURRENT_TIME, timeInPrevState;
-Process* CURRENT_RUNNING_PROCESS;
-DES* desLayer = new DES();
-deque<int> randvals;
-int THE_QUANTUM, MAX_PRIO;
-vector< vector<int> > io_list;
-vector<Process*> procList;
 
 char* stateConvert(State target) {
     string rst;
@@ -279,17 +341,25 @@ void Simulation()
         int temp = CURRENT_TIME-proc->state_ts;
         timeInPrevState = CURRENT_TIME - proc->state_ts;
         switch (evt->newState)
-        { // which state to transition to?
+        { 
+        // which state to transition to?
         case Ready: {
             // must come from BLOCKED or from PREEMPTION 
             // must add to run queue
             printf("%d %d %d: %s -> %s\n", CURRENT_TIME, evt->process->pid, timeInPrevState, stateConvert(evt->oldState), stateConvert(evt->newState));
             THE_SCHEDULER->add_process(proc);
-            // Event* newEvt = new Event(proc, Ready, Run, CURRENT_TIME);
-            // desLayer->add_event(newEvt);
+                // Event* newEvt = new Event(proc, Ready, Run, CURRENT_TIME);
+                // desLayer->add_event(newEvt);
+            
             if(CURRENT_RUNNING_PROCESS==nullptr) {
                 // conditional on whether something is run
                 CALL_SCHEDULER = true;
+            } 
+            if(THE_SCHEDULER->test_preempt(proc, CURRENT_TIME)) {
+                // remove the future event for the currently running process
+                desLayer->rm_event();
+                Event* newEvt = new Event(proc, Ready, Preempt, CURRENT_TIME);
+                desLayer->add_event(newEvt);
             } 
             break;
         }
@@ -302,7 +372,7 @@ void Simulation()
             // notice that we need compare to remaining time of this process RT
             int next_cpu_burst = proc->rem_cb==0?min(myrandom(proc->CB), proc->RT):min(proc->rem_cb, proc->RT); 
             proc->rem_cb = next_cpu_burst;
-            printf("%d %d %d: %s -> %s cb=%d rem=%d prio=%d\n", CURRENT_TIME, evt->process->pid, timeInPrevState, stateConvert(evt->oldState), stateConvert(evt->newState), next_cpu_burst, proc->RT, proc->PRIO-1);
+            printf("%d %d %d: %s -> %s cb=%d rem=%d prio=%d\n", CURRENT_TIME, evt->process->pid, timeInPrevState, stateConvert(evt->oldState), stateConvert(evt->newState), next_cpu_burst, proc->RT, proc->DYN_PRIO);
             Event* nextEvt;
             if(proc->quantum>next_cpu_burst) {
                 // turn to blocking state
@@ -332,24 +402,45 @@ void Simulation()
                 // update event queue with right time
                 // in specific ready->run event whose timestamp is before this current time should be delayed with current cpu burst
                 Event* doneEvt = new Event(proc, Run, Done, CURRENT_TIME);
-                for(int i=0; i<desLayer->eventQueue.size(); i++) {
-                    Event* cur = desLayer->eventQueue.at(i);
-                    if(cur->timeStamp>=CURRENT_TIME) {
-                        break;
-                    }
-                    if(cur->timeStamp<CURRENT_TIME&&cur->oldState==Ready&&cur->newState==Run) {
-                        cur->timeStamp += (nextEvt->timeStamp-evt->timeStamp);
-                    }
-                }
+                // deque<Event*> foundQueue;
+                // deque<Event*> prevQueue;
+                // while(!desLayer->eventQueue.empty()) {
+                //     Event* cur = desLayer->eventQueue.front();
+                //     if(cur->timeStamp>=CURRENT_TIME) {
+                //         break;
+                //     }
+                //     if(cur->timeStamp<=CURRENT_TIME&&cur->oldState==Ready&&cur->newState==Run) {
+                //         cur->timeStamp += (nextEvt->timeStamp-evt->timeStamp);
+                //         foundQueue.push_back(cur);
+                //     } else {
+                //         prevQueue.push_back(cur);
+                //     }
+                // }
+                // while(!prevQueue.empty()){
+                //     Event* cur = prevQueue.front();
+                //     prevQueue.pop_front();
+                //     desLayer->eventQueue.push_front();
+                // }
+
+
+                // for(int i=0; i<desLayer->eventQueue.size(); i++) {
+                //     Event* cur = desLayer->eventQueue.at(i);
+                //     if(cur->timeStamp>=CURRENT_TIME) {
+                //         break;
+                //     }
+                //     if(cur->timeStamp<=CURRENT_TIME&&cur->oldState==Ready&&cur->newState==Run) {
+                //         cur->timeStamp += (nextEvt->timeStamp-evt->timeStamp);
+                //     }
+                // }
                 desLayer->add_event(doneEvt);
                 // set Finishing time
                 proc->FT = nextEvt->timeStamp;
                 // set Tournaround time 
                 proc->TT = proc->FT-proc->AT;
-                CURRENT_RUNNING_PROCESS = nullptr;
+                // CURRENT_RUNNING_PROCESS = nullptr;
                 delete nextEvt;
                 nextEvt = nullptr;
-                CALL_SCHEDULER = true;
+                // CALL_SCHEDULER = true;
             }
             break;
         }
@@ -382,6 +473,8 @@ void Simulation()
         }
         case Done: {
             printf("%d %d %d: Done\n", CURRENT_TIME, evt->process->pid, timeInPrevState);
+            CURRENT_RUNNING_PROCESS = nullptr;
+            CALL_SCHEDULER = true;
             break;
         }
         case Created: {
@@ -458,9 +551,11 @@ int myrandom(int burst) {
 int main(int argc, char *argv[])
 {
     // initialize scheduler global variable 
-    SCHEDULER_NAME = "FCFS";
+    SCHEDULER_NAME = "LCFS";
     MAX_PRIO = 4;
     THE_QUANTUM = 10000;
+    desLayer = new DES();
+    THE_SCHEDULER = new LCFS();
     
     // read random number from rfile
     fstream randFile;
@@ -478,7 +573,7 @@ int main(int argc, char *argv[])
     randFile.close();
     // read input file
     fstream file;
-    file.open("./input/input4", fstream::in);
+    file.open("./input/input6", fstream::in);
     int procCnt = 0; // used to signal process id
     while (!file.eof())
     {
