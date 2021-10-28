@@ -82,6 +82,7 @@ public:
         RT = TC;
         IT = 0;
     }
+    
 };
 
 class Scheduler
@@ -166,6 +167,51 @@ public:
         return false;
     }
 
+};
+
+
+class SRTF: public Scheduler {
+public:
+    vector<Process*> runQueue;
+    SRTF() {
+
+    }
+
+    void add_process(Process* process) {
+        int index = 0;
+        for(; index<runQueue.size(); index++) {
+            Process* cur = runQueue.at(index);
+            if(cur->RT<=process->RT) {
+                break;
+            }
+        }
+        runQueue.insert(runQueue.begin()+index, process);
+    }
+
+    Process* get_next_process() {
+        Process* next;
+        if(runQueue.empty()) {
+            return nullptr;
+        } else {
+            next = runQueue.back();
+            runQueue.pop_back();
+            while(next->RT==0&&!runQueue.empty()) {
+                next = runQueue.back();
+                runQueue.pop_back();
+            }
+            if(next->RT==0) {
+                return nullptr;
+            } else {
+                return next;
+            }
+        }
+    }
+    
+    bool test_preempt(Process *p, int curtime)
+    {
+        // false but for ‘E’
+        return false;
+    }    
 };
 
 class Event
@@ -551,11 +597,11 @@ int myrandom(int burst) {
 int main(int argc, char *argv[])
 {
     // initialize scheduler global variable 
-    SCHEDULER_NAME = "LCFS";
+    SCHEDULER_NAME = "SRTF";
     MAX_PRIO = 4;
     THE_QUANTUM = 10000;
     desLayer = new DES();
-    THE_SCHEDULER = new LCFS();
+    THE_SCHEDULER = new SRTF();
     
     // read random number from rfile
     fstream randFile;
