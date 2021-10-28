@@ -5,6 +5,7 @@
         "deque": "cpp",
         "sstream": "cpp",
         "fstream": "cpp",
-        "string": "cpp"
+        "string": "cpp",
+        "queue": "cpp"
     }
 }

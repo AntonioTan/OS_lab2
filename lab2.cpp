@@ -28,6 +28,7 @@ class Event;
 class Scheduler;
 class FCFS;
 class LCFS;
+class SRTF;
 class DES;
 char* stateConvert(State target);
 void Simulation();
@@ -214,6 +215,44 @@ public:
     }    
 };
 
+class RR: public Scheduler {
+public:
+    queue<Process*> runQueue;
+    RR()
+    {
+    }
+    void add_process(Process* process)
+    {
+        runQueue.push(process);
+    }
+    Process* get_next_process()
+    {
+        Process* next;
+        if(runQueue.empty()) {
+            return nullptr;
+        } else {
+            next = runQueue.front();
+            runQueue.pop();
+            while(next->RT==0&&!runQueue.empty()) {
+                next = runQueue.front();
+                runQueue.pop();
+            }
+            if(next->RT==0) {
+                return nullptr;
+            } else {
+                return next;
+            }
+        }
+        
+    }
+    bool test_preempt(Process *p, int curtime)
+    {
+        // false but for ‘E’
+        return false;
+    }; 
+
+};
+
 class Event
 {
 public:
@@ -282,7 +321,7 @@ public:
             eventQueue.push_back(target);
         }
         char* newEvtQ = printEventQ();
-        printf("AddEvent(%d:%d:%s): %s ==> %s\n", target->timeStamp, target->process->pid, stateConvert(target->newState), originalEvtQ, newEvtQ);
+        // printf("AddEvent(%d:%d:%s): %s ==> %s\n", target->timeStamp, target->process->pid, stateConvert(target->newState), originalEvtQ, newEvtQ);
     }
     void rm_event()
     {
@@ -341,7 +380,7 @@ char* stateConvert(State target) {
             break;
         }
         case(Preempt): {
-            rst = "PREEMPT";
+            rst = "READY";
             break;
         }
         case(Done): {
@@ -420,10 +459,11 @@ void Simulation()
             proc->rem_cb = next_cpu_burst;
             printf("%d %d %d: %s -> %s cb=%d rem=%d prio=%d\n", CURRENT_TIME, evt->process->pid, timeInPrevState, stateConvert(evt->oldState), stateConvert(evt->newState), next_cpu_burst, proc->RT, proc->DYN_PRIO);
             Event* nextEvt;
-            if(proc->quantum>next_cpu_burst) {
+            if(proc->quantum>=next_cpu_burst) {
                 // turn to blocking state
                 proc->RT -= next_cpu_burst;
-                proc->quantum -= next_cpu_burst;
+                proc->quantum = THE_QUANTUM;
+                // proc->quantum -= next_cpu_burst;
                 proc->rem_cb -= next_cpu_burst;
                 nextEvt = new Event(proc, Run, Block, CURRENT_TIME+next_cpu_burst);
             } else {
@@ -512,6 +552,7 @@ void Simulation()
         case Preempt: {
             // add to runqueue (no event is generated)
             // set CURRENT_RUNNING_PROCESS
+            printf("%d %d %d: %s -> %s  cb=%d rem=%d prio=%d\n", CURRENT_TIME, evt->process->pid, timeInPrevState, stateConvert(evt->oldState), stateConvert(evt->newState), proc->rem_cb, proc->RT, proc->DYN_PRIO);
             CURRENT_RUNNING_PROCESS = nullptr;
             THE_SCHEDULER->add_process(proc);
             CALL_SCHEDULER = true;
@@ -557,7 +598,11 @@ void Simulation()
 
 // Summary is used to print standard output of this simulation
 void Summary() {
-    printf("%s\n", SCHEDULER_NAME.c_str());
+    if(THE_QUANTUM==10000) {
+        printf("%s\n", SCHEDULER_NAME.c_str());
+    } else {
+        printf("%s %d\n", SCHEDULER_NAME.c_str(), THE_QUANTUM);
+    }
     vector<Process*>::iterator procIte = procList.begin();
     int procCnt = procList.size();
     int sumryFT = INT_MIN; // Finishing time of the last event (i.e. the last process finished execution)
@@ -597,11 +642,12 @@ int myrandom(int burst) {
 int main(int argc, char *argv[])
 {
     // initialize scheduler global variable 
-    SCHEDULER_NAME = "SRTF";
+    SCHEDULER_NAME = "RR";
     MAX_PRIO = 4;
-    THE_QUANTUM = 10000;
+    THE_QUANTUM = 2;
+    // THE_QUANTUM = 10000;
     desLayer = new DES();
-    THE_SCHEDULER = new SRTF();
+    THE_SCHEDULER = new RR();
     
     // read random number from rfile
     fstream randFile;
