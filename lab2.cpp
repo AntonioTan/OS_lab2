@@ -8,6 +8,9 @@
 #include <queue>
 #include <map>
 #include <set>
+#include <stdio.h>
+#include <unistd.h> 
+
 using namespace std;
 // Some probs I need to consider later
 // 1. CURRENT_RUNNING_PROCESS setup
@@ -41,6 +44,7 @@ int myrandom(int burst);
 
 // some global variable
 string SCHEDULER_NAME;
+char* SCHEDULER_TYPE;
 Scheduler* THE_SCHEDULER;
 bool CALL_SCHEDULER = false;
 int CURRENT_TIME, timeInPrevState;
@@ -48,9 +52,14 @@ Process* CURRENT_RUNNING_PROCESS;
 DES* desLayer;
 deque<int> randvals;
 int THE_QUANTUM, MAX_PRIO;
-bool whetherQ;
 vector< vector<int> > io_list;
 vector<Process*> procList;
+bool WHETHER_VERBOSE;
+bool WHETHER_TRACK;
+bool WHETHER_Q;
+bool WHETHER_P;
+string INPUT_FILE;
+string RFILE;
 
 class Process
 {
@@ -354,7 +363,7 @@ public:
             }
     }
     void add_process(Process* process) {
-        if(whetherQ) {
+        if(WHETHER_Q) {
             cout << "add process before" << endl;
             printQ();
         }
@@ -366,7 +375,7 @@ public:
             activeQ[process->DYN_PRIO].push_back(process);
             activeBitmap[process->DYN_PRIO] = true;
         }
-        if(whetherQ) {
+        if(WHETHER_Q) {
             cout << "add process after" << endl;
             printQ();
         }
@@ -381,7 +390,7 @@ public:
         return rst;
     }
     Process* get_next_process() {
-        if(whetherQ) {
+        if(WHETHER_Q) {
             cout<< "get next process before" << endl;
             printQ();
         }
@@ -419,7 +428,7 @@ public:
 
             }
         }
-        if(whetherQ) {
+        if(WHETHER_Q) {
             cout<< "get next process after" << endl;
             printQ();
         }
@@ -506,7 +515,7 @@ public:
             eventQueue.push_back(target);
         }
         char* newEvtQ = printEventQ();
-        if(whetherQ) {
+        if(WHETHER_TRACK) {
             printf("AddEvent(%d:%d:%s): %s ==> %s\n", target->timeStamp, target->process->pid, stateConvert(target->newState), originalEvtQ, newEvtQ);
         }
     }
@@ -827,23 +836,72 @@ int myrandom(int burst) {
 int main(int argc, char *argv[])
 {
     // initialize scheduler global variable 
-    SCHEDULER_NAME = "PREPRIO";
+    SCHEDULER_NAME = "PRIO";
     MAX_PRIO = 4;
-    THE_QUANTUM = 4;
-    // THE_QUANTUM = 10000;
+    THE_QUANTUM = 10000;
     desLayer = new DES();
-    // THE_SCHEDULER = new PRIO_SCHEDULER(MAX_PRIO);
-    THE_SCHEDULER = new PREPRIO_SCHEDULER(MAX_PRIO);
-    whetherQ = false;
+    WHETHER_Q = false;
+    int c;
+    int index;
+    opterr = 0;
+    while ((c = getopt (argc, argv, "vteps:")) != -1) {
+        switch (c)
+        {
+        case 'v':
+            WHETHER_VERBOSE = true;
+            break;
+        case 't':
+            WHETHER_TRACK = true;
+            break;
+        case 'e':
+            WHETHER_Q = true;
+            break;
+        case 'p':
+            WHETHER_P = true;
+            break;
+        case 's':
+            SCHEDULER_TYPE = optarg;
+            sscanf(optarg+1, "%d:%d", &THE_QUANTUM, &MAX_PRIO);
+            break;
+        }
+    }
+    if(optind<argc) {
+        INPUT_FILE = argv[optind];
+    } else {
+        cout << "Missing Input File!" << endl;
+        return 0;
+    }
+    if(optind+1<argc) {
+        RFILE = argv[optind+1];
+    } else {
+        cout << "Missing Rfile!" << endl;
+        return 0;
+    }
+    if(strcmp(SCHEDULER_TYPE,"F")==0) {
+        THE_SCHEDULER = new FCFS();
+    } else if(strcmp(SCHEDULER_TYPE,"L")==0) {
+        THE_SCHEDULER = new LCFS();
+    } else if(strcmp(SCHEDULER_TYPE,"S")==0) {
+        THE_SCHEDULER = new SRTF();
+    } else if(*SCHEDULER_TYPE=='R') {
+        THE_SCHEDULER = new RR();
+    } else if(*SCHEDULER_TYPE=='P') {
+        THE_SCHEDULER = new PRIO_SCHEDULER(MAX_PRIO);
+    } else if(*SCHEDULER_TYPE=='E') {
+        THE_SCHEDULER = new PREPRIO_SCHEDULER(MAX_PRIO);
+    } else {
+        cout << "Wrong type of scheduler!" << endl;
+        return 0;
+    }
 
     // read random number from rfile
     fstream randFile;
-    randFile.open("./input/rfile", fstream::in);
+    randFile.open(RFILE, fstream::in);
     string line;
-    getline(randFile, line, '\n');
+    std::getline(randFile, line, '\n');
     int randCnt = stoi(line);
     while(!randFile.eof()) {
-        getline(randFile, line, '\n');
+        std::getline(randFile, line, '\n');
         if(line.length()>0) {
             int randNum = stoi(line);
             randvals.push_back(randNum);
@@ -852,12 +910,12 @@ int main(int argc, char *argv[])
     randFile.close();
     // read input file
     fstream file;
-    file.open("./input/input6", fstream::in);
+    file.open(INPUT_FILE, fstream::in);
     int procCnt = 0; // used to signal process id
     while (!file.eof())
     {
         string line;
-        getline(file, line, '\n');
+        std::getline(file, line, '\n');
         istringstream iss(line);
         vector<string> tokens;
         copy(istream_iterator<string>(iss),

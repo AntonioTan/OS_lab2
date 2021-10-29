@@ -6,6 +6,7 @@
         "sstream": "cpp",
         "fstream": "cpp",
         "string": "cpp",
-        "queue": "cpp"
+        "queue": "cpp",
+        "regex": "cpp"
     }
 }
