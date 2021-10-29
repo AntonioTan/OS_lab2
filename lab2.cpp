@@ -441,7 +441,9 @@ public:
         } else {
             bool rst = CURRENT_RUNNING_PROCESS->DYN_PRIO<p->DYN_PRIO&&CURRENT_RUNNING_PROCESS->next_state_ts!=curtime;
             bool condition1 = CURRENT_RUNNING_PROCESS->DYN_PRIO<p->DYN_PRIO;
-            printf("---> PRIO preemption %d by %d ? %d TS=%d now=%d) --> %s\n", CURRENT_RUNNING_PROCESS->pid, p->pid, condition1?1:0, CURRENT_RUNNING_PROCESS->next_state_ts, curtime, rst?"YES":"NO");
+            if(WHETHER_P) {
+                printf("---> PRIO preemption %d by %d ? %d TS=%d now=%d) --> %s\n", CURRENT_RUNNING_PROCESS->pid, p->pid, condition1?1:0, CURRENT_RUNNING_PROCESS->next_state_ts, curtime, rst?"YES":"NO");
+            }
             return rst;
         }
     }
@@ -627,7 +629,9 @@ void Simulation()
         case Ready: {
             // must come from BLOCKED or from PREEMPTION 
             // must add to run queue
-            printf("%d %d %d: %s -> %s\n", CURRENT_TIME, evt->process->pid, timeInPrevState, stateConvert(evt->oldState), stateConvert(evt->newState));
+            if(WHETHER_VERBOSE) {
+                printf("%d %d %d: %s -> %s\n", CURRENT_TIME, evt->process->pid, timeInPrevState, stateConvert(evt->oldState), stateConvert(evt->newState));
+            }
             if(evt->oldState==Block) {
                 proc->DYN_PRIO = proc->PRIO-1;
             }
@@ -669,7 +673,9 @@ void Simulation()
             // notice that we need compare to remaining time of this process RT
             int next_cpu_burst = proc->rem_cb==0?min(myrandom(proc->CB), proc->RT):min(proc->rem_cb, proc->RT); 
             proc->rem_cb = next_cpu_burst;
-            printf("%d %d %d: %s -> %s cb=%d rem=%d prio=%d\n", CURRENT_TIME, evt->process->pid, timeInPrevState, stateConvert(evt->oldState), stateConvert(evt->newState), next_cpu_burst, proc->RT, proc->DYN_PRIO);
+            if(WHETHER_VERBOSE) {
+                printf("%d %d %d: %s -> %s cb=%d rem=%d prio=%d\n", CURRENT_TIME, evt->process->pid, timeInPrevState, stateConvert(evt->oldState), stateConvert(evt->newState), next_cpu_burst, proc->RT, proc->DYN_PRIO);
+            }
             Event* nextEvt;
             if(proc->quantum>=next_cpu_burst) {
                 // turn to blocking state
@@ -725,7 +731,9 @@ void Simulation()
             io_list.push_back(nextIOPair);
             // add io burst time to process set IT
             proc->IT += next_io_burst;
-            printf("%d %d %d: %s -> %s  ib=%d rem=%d\n", CURRENT_TIME, evt->process->pid, timeInPrevState, stateConvert(evt->oldState), stateConvert(evt->newState), next_io_burst, proc->RT);
+            if(WHETHER_VERBOSE) {
+                printf("%d %d %d: %s -> %s  ib=%d rem=%d\n", CURRENT_TIME, evt->process->pid, timeInPrevState, stateConvert(evt->oldState), stateConvert(evt->newState), next_io_burst, proc->RT);
+            }
             nextEvt = new Event(proc, Block, Ready, CURRENT_TIME+next_io_burst);
             proc->next_state_ts = CURRENT_TIME+next_io_burst;
             desLayer->add_event(nextEvt);
@@ -735,7 +743,9 @@ void Simulation()
         case Preempt: {
             // add to runqueue (no event is generated)
             // set CURRENT_RUNNING_PROCESS
-            printf("%d %d %d: %s -> %s  cb=%d rem=%d prio=%d\n", CURRENT_TIME, evt->process->pid, timeInPrevState, stateConvert(evt->oldState), stateConvert(evt->newState), proc->rem_cb, proc->RT, proc->DYN_PRIO);
+            if(WHETHER_VERBOSE) {
+                printf("%d %d %d: %s -> %s  cb=%d rem=%d prio=%d\n", CURRENT_TIME, evt->process->pid, timeInPrevState, stateConvert(evt->oldState), stateConvert(evt->newState), proc->rem_cb, proc->RT, proc->DYN_PRIO);
+            }
             // dynamic decrease of priority
             if(SCHEDULER_NAME=="PREPRIO"||SCHEDULER_NAME=="PRIO") {
                 proc->DYN_PRIO -= 1;
@@ -751,7 +761,9 @@ void Simulation()
             break;
         }
         case Done: {
-            printf("%d %d %d: Done\n", CURRENT_TIME, evt->process->pid, timeInPrevState);
+            if(WHETHER_VERBOSE) {
+                printf("%d %d %d: Done\n", CURRENT_TIME, evt->process->pid, timeInPrevState);
+            }
             CURRENT_RUNNING_PROCESS = nullptr;
             CALL_SCHEDULER = true;
             break;
@@ -836,7 +848,6 @@ int myrandom(int burst) {
 int main(int argc, char *argv[])
 {
     // initialize scheduler global variable 
-    SCHEDULER_NAME = "PRIO";
     MAX_PRIO = 4;
     THE_QUANTUM = 10000;
     desLayer = new DES();
@@ -879,16 +890,22 @@ int main(int argc, char *argv[])
     }
     if(strcmp(SCHEDULER_TYPE,"F")==0) {
         THE_SCHEDULER = new FCFS();
+        SCHEDULER_NAME = "FCFS";
     } else if(strcmp(SCHEDULER_TYPE,"L")==0) {
         THE_SCHEDULER = new LCFS();
+        SCHEDULER_NAME = "LCFS";
     } else if(strcmp(SCHEDULER_TYPE,"S")==0) {
         THE_SCHEDULER = new SRTF();
+        SCHEDULER_NAME = "SRTF";
     } else if(*SCHEDULER_TYPE=='R') {
         THE_SCHEDULER = new RR();
+        SCHEDULER_NAME = "RR";
     } else if(*SCHEDULER_TYPE=='P') {
         THE_SCHEDULER = new PRIO_SCHEDULER(MAX_PRIO);
+        SCHEDULER_NAME = "PRIO";
     } else if(*SCHEDULER_TYPE=='E') {
         THE_SCHEDULER = new PREPRIO_SCHEDULER(MAX_PRIO);
+        SCHEDULER_NAME = "PREPRIO";
     } else {
         cout << "Wrong type of scheduler!" << endl;
         return 0;
