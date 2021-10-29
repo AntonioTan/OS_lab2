@@ -31,6 +31,7 @@ class LCFS;
 class SRTF;
 class RR;
 class PRIO_SCHEDULER;
+class PREPRIO_SCHEDULER;
 class DES;
 char* stateConvert(State target);
 void Simulation();
@@ -47,7 +48,7 @@ Process* CURRENT_RUNNING_PROCESS;
 DES* desLayer;
 deque<int> randvals;
 int THE_QUANTUM, MAX_PRIO;
-
+bool whetherQ;
 vector< vector<int> > io_list;
 vector<Process*> procList;
 
@@ -69,6 +70,7 @@ public:
     int pid;
     int quantum;
     int state_ts;
+    int next_state_ts;
     int rem_cb; // whether has remaining cpu_burst or need to initialize
     Process(int id, int arrivedTime, int totalCPU, int cpuBurst, int ioBurst, int priority, int timeSlice)
     {
@@ -133,7 +135,7 @@ public:
     {
         // false but for ‘E’
         return false;
-    }; 
+    }
 };
 
 class LCFS: public Scheduler 
@@ -252,7 +254,7 @@ public:
     {
         // false but for ‘E’
         return false;
-    }; 
+    }
 
 };
 
@@ -326,7 +328,117 @@ public:
     {
         // false but for ‘E’
         return false;
-    }; 
+    }
+};
+
+class PREPRIO_SCHEDULER: public Scheduler {
+public:
+    deque<Process*> *activeQ, *expiredQ;
+    vector<bool> activeBitmap, expiredBitmap;
+    PREPRIO_SCHEDULER(int maxPrio) {
+        activeQ = new deque<Process*>[maxPrio];
+        expiredQ = new deque<Process*>[maxPrio];
+        for(int i=0; i<maxPrio; i++) {
+            activeBitmap.push_back(false);
+            expiredBitmap.push_back(false);
+        }
+    }
+    void printQ() {
+            for(int i=0; i<MAX_PRIO; i++) {
+                deque<Process*> cur = activeQ[i];
+                cout << i << ": ";
+                for(int j=0; j<cur.size(); j++) {
+                    cout << cur.at(j)->pid << " ";    
+                }
+                cout << endl;
+            }
+    }
+    void add_process(Process* process) {
+        if(whetherQ) {
+            cout << "add process before" << endl;
+            printQ();
+        }
+        if(process->DYN_PRIO<0) {
+            process->DYN_PRIO = process->PRIO-1;
+            expiredQ[process->DYN_PRIO].push_back(process);
+            expiredBitmap[process->DYN_PRIO] = true;
+        } else {
+            activeQ[process->DYN_PRIO].push_back(process);
+            activeBitmap[process->DYN_PRIO] = true;
+        }
+        if(whetherQ) {
+            cout << "add process after" << endl;
+            printQ();
+        }
+    }
+    int getHighestQueueIndex() {
+        int rst = -1;
+        for(int i=activeBitmap.size()-1; i>=0; i--) {
+            if(activeBitmap[i]) {
+                return i;
+            }
+        }
+        return rst;
+    }
+    Process* get_next_process() {
+        if(whetherQ) {
+            cout<< "get next process before" << endl;
+            printQ();
+        }
+        int queueIndex = getHighestQueueIndex();
+        if(queueIndex!=-1) { // activeQ not empty
+            Process* rst = activeQ[queueIndex].front();
+            if(CURRENT_TIME==8) {
+                    cout << activeQ[queueIndex].size() << endl;
+                }
+            activeQ[queueIndex].pop_front();
+            
+            if(activeQ[queueIndex].empty()) {
+                
+                activeBitmap[queueIndex] = false;
+            }
+            return rst;
+        } else {
+            cout << "swap" << endl;
+            // swap Queue and Bitmap
+            deque<Process*> *tempQ = activeQ;
+            activeQ = expiredQ;
+            expiredQ = tempQ;
+            for(int i=0; i<expiredBitmap.size(); i++) {
+                bool temp = activeBitmap[i];
+                activeBitmap[i] = expiredBitmap[i];
+                expiredBitmap[i] = temp;
+            }
+            // Try again 
+            queueIndex = getHighestQueueIndex();
+            if(queueIndex==-1) {
+                return nullptr;
+            } else {
+                Process* rst = activeQ[queueIndex].front();
+                activeQ[queueIndex].pop_front();
+                if(activeQ[queueIndex].empty()) {
+                    activeBitmap[queueIndex] = false;
+                }
+                return rst;
+
+            }
+        }
+        if(whetherQ) {
+            cout<< "get next process after" << endl;
+            printQ();
+        }
+    }
+    bool test_preempt(Process *p, int curtime)
+    {
+        // false but for ‘E’
+        if(CURRENT_RUNNING_PROCESS==nullptr) {
+            return false;
+        } else {
+            bool rst = CURRENT_RUNNING_PROCESS->DYN_PRIO<p->DYN_PRIO&&CURRENT_RUNNING_PROCESS->next_state_ts!=curtime;
+            printf("---> PRIO preemption %d by %d ? %d TS=%d now=%d) --> %s\n", CURRENT_RUNNING_PROCESS->pid, p->pid, rst?1:0, CURRENT_RUNNING_PROCESS->next_state_ts, curtime, rst?"YES":"No");
+            return rst;
+        }
+    }
 };
 
 class Event
@@ -397,7 +509,9 @@ public:
             eventQueue.push_back(target);
         }
         char* newEvtQ = printEventQ();
-        // printf("AddEvent(%d:%d:%s): %s ==> %s\n", target->timeStamp, target->process->pid, stateConvert(target->newState), originalEvtQ, newEvtQ);
+        if(whetherQ) {
+            printf("AddEvent(%d:%d:%s): %s ==> %s\n", target->timeStamp, target->process->pid, stateConvert(target->newState), originalEvtQ, newEvtQ);
+        }
     }
     void rm_event()
     {
@@ -456,7 +570,7 @@ char* stateConvert(State target) {
             break;
         }
         case(Preempt): {
-            rst = "READY";
+            rst = "PREEMPT";
             break;
         }
         case(Done): {
@@ -511,19 +625,30 @@ void Simulation()
             if(evt->oldState==Block) {
                 proc->DYN_PRIO = proc->PRIO-1;
             }
-            THE_SCHEDULER->add_process(proc);
                 // Event* newEvt = new Event(proc, Ready, Run, CURRENT_TIME);
                 // desLayer->add_event(newEvt);
             
-            if(CURRENT_RUNNING_PROCESS==nullptr) {
-                // conditional on whether something is run
-                CALL_SCHEDULER = true;
-            } 
             if(THE_SCHEDULER->test_preempt(proc, CURRENT_TIME)) {
                 // remove the future event for the currently running process
                 desLayer->rm_event();
-                Event* newEvt = new Event(proc, Ready, Preempt, CURRENT_TIME);
+                int gap = CURRENT_RUNNING_PROCESS->next_state_ts-CURRENT_TIME;
+                CURRENT_RUNNING_PROCESS->quantum = THE_QUANTUM;
+                CURRENT_RUNNING_PROCESS->RT += gap;
+                CURRENT_RUNNING_PROCESS->rem_cb += gap;
+                CURRENT_RUNNING_PROCESS->next_state_ts = CURRENT_TIME;
+                // THE_SCHEDULER->add_process(CURRENT_RUNNING_PROCESS);
+                Event* interruptEvt = new Event(CURRENT_RUNNING_PROCESS, Run, Preempt, CURRENT_TIME);
+                desLayer->add_event(interruptEvt);
+                CURRENT_RUNNING_PROCESS = nullptr;
+                Event* newEvt = new Event(proc, Ready, Run, CURRENT_TIME);
+                proc->next_state_ts = CURRENT_TIME;
                 desLayer->add_event(newEvt);
+            } else {
+                THE_SCHEDULER->add_process(proc);
+            }
+            if(CURRENT_RUNNING_PROCESS==nullptr) {
+                // conditional on whether something is run
+                CALL_SCHEDULER = true;
             } 
             break;
         }
@@ -545,12 +670,14 @@ void Simulation()
                 // proc->quantum -= next_cpu_burst;
                 proc->rem_cb -= next_cpu_burst;
                 nextEvt = new Event(proc, Run, Block, CURRENT_TIME+next_cpu_burst);
+                proc->next_state_ts = CURRENT_TIME+next_cpu_burst;
             } else {
                 // if quantum assigned to this process is less than the current cpu_burst, then minus 
                 // remaining quantum and turn the process to preemption state
                 proc->RT -= proc->quantum;
                 proc->rem_cb -= proc->quantum;
                 nextEvt = new Event(proc, Run, Preempt, CURRENT_TIME+proc->quantum);
+                proc->next_state_ts = CURRENT_TIME+proc->quantum;
                 proc->quantum = 0;
             }
             // add new event to right position in DES layer
@@ -564,6 +691,7 @@ void Simulation()
                 // update event queue with right time
                 // in specific ready->run event whose timestamp is before this current time should be delayed with current cpu burst
                 Event* doneEvt = new Event(proc, Run, Done, CURRENT_TIME);
+                proc->next_state_ts = CURRENT_TIME;
                 desLayer->add_event(doneEvt);
                 // set Finishing time
                 proc->FT = nextEvt->timeStamp;
@@ -591,6 +719,7 @@ void Simulation()
             proc->IT += next_io_burst;
             printf("%d %d %d: %s -> %s  ib=%d rem=%d\n", CURRENT_TIME, evt->process->pid, timeInPrevState, stateConvert(evt->oldState), stateConvert(evt->newState), next_io_burst, proc->RT);
             nextEvt = new Event(proc, Block, Ready, CURRENT_TIME+next_io_burst);
+            proc->next_state_ts = CURRENT_TIME+next_io_burst;
             desLayer->add_event(nextEvt);
             CALL_SCHEDULER = true;
             break;
@@ -608,6 +737,7 @@ void Simulation()
             // option2 just turn it to full quantum (using now)
             proc->quantum = THE_QUANTUM;
             CURRENT_RUNNING_PROCESS = nullptr;
+            
             THE_SCHEDULER->add_process(proc);
             CALL_SCHEDULER = true;
             break;
@@ -642,8 +772,10 @@ void Simulation()
                 CURRENT_RUNNING_PROCESS = THE_SCHEDULER->get_next_process();
                 if (CURRENT_RUNNING_PROCESS == nullptr)
                     continue;
+                
                 // create event to make this process runnable for same time.
                 Event* nextEvt = new Event(CURRENT_RUNNING_PROCESS, Ready, Run, CURRENT_TIME);
+                CURRENT_RUNNING_PROCESS->next_state_ts = CURRENT_TIME;
                 desLayer->add_event(nextEvt);
             }
         }
@@ -696,14 +828,15 @@ int myrandom(int burst) {
 int main(int argc, char *argv[])
 {
     // initialize scheduler global variable 
-    SCHEDULER_NAME = "RR";
+    SCHEDULER_NAME = "PREPRIO";
     MAX_PRIO = 4;
-    THE_QUANTUM = 5;
+    THE_QUANTUM = 4;
     // THE_QUANTUM = 10000;
     desLayer = new DES();
     // THE_SCHEDULER = new PRIO_SCHEDULER(MAX_PRIO);
-    THE_SCHEDULER = new RR();
-    
+    THE_SCHEDULER = new PREPRIO_SCHEDULER(MAX_PRIO);
+    whetherQ = false;
+
     // read random number from rfile
     fstream randFile;
     randFile.open("./input/rfile", fstream::in);
