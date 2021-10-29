@@ -388,9 +388,6 @@ public:
         int queueIndex = getHighestQueueIndex();
         if(queueIndex!=-1) { // activeQ not empty
             Process* rst = activeQ[queueIndex].front();
-            if(CURRENT_TIME==8) {
-                    cout << activeQ[queueIndex].size() << endl;
-                }
             activeQ[queueIndex].pop_front();
             
             if(activeQ[queueIndex].empty()) {
@@ -399,7 +396,6 @@ public:
             }
             return rst;
         } else {
-            cout << "swap" << endl;
             // swap Queue and Bitmap
             deque<Process*> *tempQ = activeQ;
             activeQ = expiredQ;
@@ -435,7 +431,8 @@ public:
             return false;
         } else {
             bool rst = CURRENT_RUNNING_PROCESS->DYN_PRIO<p->DYN_PRIO&&CURRENT_RUNNING_PROCESS->next_state_ts!=curtime;
-            printf("---> PRIO preemption %d by %d ? %d TS=%d now=%d) --> %s\n", CURRENT_RUNNING_PROCESS->pid, p->pid, rst?1:0, CURRENT_RUNNING_PROCESS->next_state_ts, curtime, rst?"YES":"No");
+            bool condition1 = CURRENT_RUNNING_PROCESS->DYN_PRIO<p->DYN_PRIO;
+            printf("---> PRIO preemption %d by %d ? %d TS=%d now=%d) --> %s\n", CURRENT_RUNNING_PROCESS->pid, p->pid, condition1?1:0, CURRENT_RUNNING_PROCESS->next_state_ts, curtime, rst?"YES":"NO");
             return rst;
         }
     }
@@ -570,7 +567,7 @@ char* stateConvert(State target) {
             break;
         }
         case(Preempt): {
-            rst = "PREEMPT";
+            rst = "READY";
             break;
         }
         case(Done): {
@@ -639,10 +636,12 @@ void Simulation()
                 // THE_SCHEDULER->add_process(CURRENT_RUNNING_PROCESS);
                 Event* interruptEvt = new Event(CURRENT_RUNNING_PROCESS, Run, Preempt, CURRENT_TIME);
                 desLayer->add_event(interruptEvt);
-                CURRENT_RUNNING_PROCESS = nullptr;
-                Event* newEvt = new Event(proc, Ready, Run, CURRENT_TIME);
+                // CURRENT_RUNNING_PROCESS = nullptr;
+                // Event* newEvt = new Event(proc, Ready, Run, CURRENT_TIME);
                 proc->next_state_ts = CURRENT_TIME;
-                desLayer->add_event(newEvt);
+                // desLayer->add_event(newEvt);
+                THE_SCHEDULER->add_process(proc);
+
             } else {
                 THE_SCHEDULER->add_process(proc);
             }
