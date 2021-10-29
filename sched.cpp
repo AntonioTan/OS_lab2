@@ -10,6 +10,10 @@
 #include <set>
 #include <stdio.h>
 #include <unistd.h> 
+#include <cstring>
+#include <algorithm>
+#include <climits>
+#include <iterator>
 
 using namespace std;
 // Some probs I need to consider later
